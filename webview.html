@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision"></script>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background-color: black;
+      }
+      video {
+        width: 100vw;
+        height: 100vh;
+        object-fit: cover;
+      }
+    </style>
+  </head>
+  <body>
+    <video id="webcam" autoplay muted playsinline></video>
+    <script type="module">
+      import {
+        FaceLandmarker,
+        FilesetResolver,
+      } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest";
+
+      let faceLandmarker;
+      let webcam;
+
+      async function init() {
+        const vision = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+        );
+
+        faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath:
+              "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+            delegate: "GPU",
+          },
+          outputFaceBlendshapes: true,
+          runningMode: "VIDEO",
+          numFaces: 1,
+        });
+
+        webcam = document.getElementById("webcam");
+        navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
+          webcam.srcObject = stream;
+        });
+
+        detectLoop();
+      }
+
+      async function detectLoop() {
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+
+        setInterval(() => {
+          if (!faceLandmarker || !webcam.videoWidth) return;
+
+          canvas.width = webcam.videoWidth;
+          canvas.height = webcam.videoHeight;
+          ctx.drawImage(webcam, 0, 0, canvas.width, canvas.height);
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+          const now = Date.now();
+          const results = faceLandmarker.detect(imageData, now);
+          if (results.faceLandmarks.length > 0) {
+            const msg = {
+              status: "Face detected",
+              timestamp: now,
+              landmarkCount: results.faceLandmarks[0].length,
+            };
+            window.ReactNativeWebView?.postMessage(JSON.stringify(msg));
+          } else {
+            window.ReactNativeWebView?.postMessage(
+              JSON.stringify({ status: "No face detected" })
+            );
+          }
+        }, 1000);
+      }
+
+      init();
+    </script>
+  </body>
+</html>
