@@ -38,7 +38,8 @@
             delegate: "GPU",
           },
           outputFaceBlendshapes: true,
-          runningMode: "VIDEO",
+          // runningMode: "VIDEO",
+          runningMode: "IMAGE",
           numFaces: 1,
         });
 
@@ -51,11 +52,17 @@
       }
 
       async function detectLoop() {
+        console.log("🔁 detectLoop() running");
         const canvas = document.createElement("canvas");
         const ctx = canvas.getContext("2d");
 
         setInterval(() => {
-          if (!faceLandmarker || !webcam.videoWidth) return;
+          console.log("⏱ checking faceLandmarker...");
+
+          if (!faceLandmarker || !webcam.videoWidth) {
+            console.log("🚫 faceLandmarker or webcam not ready");
+            return;
+          }
 
           canvas.width = webcam.videoWidth;
           canvas.height = webcam.videoHeight;
@@ -64,6 +71,8 @@
 
           const now = Date.now();
           const results = faceLandmarker.detect(imageData, now);
+          // const results = faceLandmarker.detectForVideo(imageData, now);
+          console.log("📸 Detection results:", results);
           if (results.faceLandmarks.length > 0) {
             const msg = {
               status: "Face detected",
