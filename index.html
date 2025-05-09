@@ -25,7 +25,9 @@
 
       let faceLandmarker;
       let webcam;
-      let previousTime = Date.now();
+      let marStartTime = null;
+      const MAR_THRESHOLD = 0.07;
+      const MAR_DURATION = 1750; // milliseconds
 
       function calculateEAR(landmarks) {
         const left = landmarks[159].y - landmarks[145].y;
@@ -82,10 +84,18 @@
             const ear = calculateEAR(landmarks);
             const mar = calculateMAR(landmarks);
 
-            const drowsy = ear < 0.15 && mar > 0.5;
+            let status = "Face detected";
+            if (mar > MAR_THRESHOLD) {
+              if (!marStartTime) marStartTime = now;
+              if (now - marStartTime >= MAR_DURATION) {
+                status = "Drowsiness Alert";
+              }
+            } else {
+              marStartTime = null;
+            }
 
             const msg = {
-              status: drowsy ? "Drowsiness Alert" : "Face detected",
+              status,
               timestamp: now,
               ear: ear.toFixed(3),
               mar: mar.toFixed(3),
