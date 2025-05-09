@@ -25,6 +25,19 @@
 
       let faceLandmarker;
       let webcam;
+      let previousTime = Date.now();
+
+      function calculateEAR(landmarks) {
+        const left = landmarks[159].y - landmarks[145].y;
+        const right = landmarks[386].y - landmarks[374].y;
+        return (left + right) / 2;
+      }
+
+      function calculateMAR(landmarks) {
+        const top = landmarks[13].y;
+        const bottom = landmarks[14].y;
+        return Math.abs(top - bottom);
+      }
 
       async function init() {
         const vision = await FilesetResolver.forVisionTasks(
@@ -37,9 +50,7 @@
               "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
             delegate: "GPU",
           },
-          outputFaceBlendshapes: true,
-          // runningMode: "VIDEO",
-          runningMode: "IMAGE",
+          runningMode: "VIDEO",
           numFaces: 1,
         });
 
@@ -51,18 +62,12 @@
         detectLoop();
       }
 
-      async function detectLoop() {
-        console.log("🔁 detectLoop() running");
+      function detectLoop() {
         const canvas = document.createElement("canvas");
         const ctx = canvas.getContext("2d");
 
         setInterval(() => {
-          console.log("⏱ checking faceLandmarker...");
-
-          if (!faceLandmarker || !webcam.videoWidth) {
-            console.log("🚫 faceLandmarker or webcam not ready");
-            return;
-          }
+          if (!faceLandmarker || !webcam.videoWidth) return;
 
           canvas.width = webcam.videoWidth;
           canvas.height = webcam.videoHeight;
@@ -70,22 +75,29 @@
           const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
           const now = Date.now();
-          const results = faceLandmarker.detect(imageData, now);
-          // const results = faceLandmarker.detectForVideo(imageData, now);
-          console.log("📸 Detection results:", results);
+          const results = faceLandmarker.detectForVideo(imageData, now);
+
           if (results.faceLandmarks.length > 0) {
+            const landmarks = results.faceLandmarks[0];
+            const ear = calculateEAR(landmarks);
+            const mar = calculateMAR(landmarks);
+
+            const drowsy = ear < 0.15 && mar > 0.5;
+
             const msg = {
-              status: "Face detected",
+              status: drowsy ? "Drowsiness Alert" : "Face detected",
               timestamp: now,
-              landmarkCount: results.faceLandmarks[0].length,
+              ear: ear.toFixed(3),
+              mar: mar.toFixed(3),
             };
+
             window.ReactNativeWebView?.postMessage(JSON.stringify(msg));
           } else {
             window.ReactNativeWebView?.postMessage(
               JSON.stringify({ status: "No face detected" })
             );
           }
-        }, 600);
+        }, 1000);
       }
 
       init();
