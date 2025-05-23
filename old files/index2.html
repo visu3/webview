@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Drowsiness + Posture Detection</title>
+    <style>
+      body { margin: 0; overflow: hidden; background-color: black; }
+      video { width: 100vw; height: 100vh; object-fit: cover; }
+    </style>
+    <script>
+      // Fallback for environments without "global"
+      if (typeof global === "undefined") {
+        var global = window;
+      }
+    </script>
+    <script type="module">
+      import {
+        FaceLandmarker,
+        PoseLandmarker,
+        FilesetResolver,
+      } from "./tasks-vision.js"; // Local copy of tasks-vision
+
+      let faceLandmarker, poseLandmarker, webcam;
+      let marStartTime = null;
+      const MAR_THRESHOLD = 0.07;
+      const MAR_DURATION = 1750;
+
+      function calculateEAR(landmarks) {
+        const leftVertical = Math.abs(landmarks[159].y - landmarks[145].y);
+        const rightVertical = Math.abs(landmarks[386].y - landmarks[374].y);
+        const leftHorizontal = Math.abs(landmarks[33].x - landmarks[133].x);
+        const rightHorizontal = Math.abs(landmarks[362].x - landmarks[263].x);
+        const leftEAR = leftVertical / leftHorizontal;
+        const rightEAR = rightVertical / rightHorizontal;
+        return (leftEAR + rightEAR) / 2;
+      }
+
+      function calculateMAR(landmarks) {
+        return Math.abs(landmarks[13].y - landmarks[14].y);
+      }
+
+      function detectPosture(poseLandmarks) {
+        if (!poseLandmarks || poseLandmarks.length === 0) return "Unknown";
+        const pose = poseLandmarks[0];
+        const leftShoulder = pose[11];
+        const rightShoulder = pose[12];
+        const nose = pose[0];
+
+        const avgShoulderY = (leftShoulder.y + rightShoulder.y) / 2;
+        if (nose.y > avgShoulderY + 0.15) return "Head Down - Drowsy";
+        const shoulderDist = Math.abs(leftShoulder.x - rightShoulder.x);
+        if (shoulderDist < 0.1) return "Slouched or Turned";
+        return "Normal";
+      }
+
+      async function init() {
+        const vision = await FilesetResolver.forVisionTasks("./wasm");
+
+        faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: "./models/face_landmarker.task",
+            delegate: "GPU",
+          },
+          runningMode: "VIDEO",
+          numFaces: 1,
+        });
+
+        poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: "./models/pose_landmarker_lite.task",
+            delegate: "GPU",
+          },
+          runningMode: "VIDEO",
+          numPoses: 1,
+        });
+
+        webcam = document.getElementById("webcam");
+        navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
+          webcam.srcObject = stream;
+        });
+
+        detectLoop();
+      }
+
+      function detectLoop() {
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+
+        setInterval(() => {
+          if (!webcam.videoWidth || !faceLandmarker || !poseLandmarker) return;
+
+          canvas.width = webcam.videoWidth;
+          canvas.height = webcam.videoHeight;
+          ctx.drawImage(webcam, 0, 0, canvas.width, canvas.height);
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const now = Date.now();
+
+          const faceResults = faceLandmarker.detectForVideo(imageData, now);
+          const poseResults = poseLandmarker.detectForVideo(imageData, now);
+
+          let status = "Normal";
+          let ear = 0, mar = 0, posture = "Unknown";
+
+          if (faceResults.faceLandmarks.length > 0) {
+            const landmarks = faceResults.faceLandmarks[0];
+            ear = calculateEAR(landmarks);
+            mar = calculateMAR(landmarks);
+
+            if (mar > MAR_THRESHOLD) {
+              if (!marStartTime) marStartTime = now;
+              if (now - marStartTime >= MAR_DURATION) {
+                status = "Yawning / Drowsy";
+              }
+            } else {
+              marStartTime = null;
+            }
+
+            if (ear < 0.20) {
+              status = "Eyes Closed - Drowsy";
+            }
+          } else {
+            status = "No Face Detected";
+          }
+
+          if (poseResults.poseLandmarks.length > 0) {
+            posture = detectPosture(poseResults.poseLandmarks);
+            if (posture !== "Normal") status += `, ${posture}`;
+          }
+
+          const msg = {
+            status,
+            timestamp: now,
+            ear: ear.toFixed(3),
+            mar: mar.toFixed(3),
+            posture,
+            alcoholPPM: null,
+          };
+
+          window.ReactNativeWebView?.postMessage(JSON.stringify(msg));
+        }, 1000);
+      }
+
+      init();
+    </script>
+  </head>
+  <body>
+    <video id="webcam" autoplay muted playsinline></video>
+  </body>
+</html>
